@@ -1,7 +1,7 @@
 const { Telegraf } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
-const http = require('http'); // Render uchun qo'shildi
+const http = require('http');
 
 const token = '9154919587:AAEta__W6G-sUa62R-EpA1HHr1FES-IlE84';
 const GROUP_ID = '-1002648012307'; 
@@ -29,6 +29,7 @@ async function checkAndUnmute(userId) {
         const requestedPrivate = requestedUsers.has(userId);
 
         if (inPublicChannel && requestedPrivate) {
+            // Shartlar bajarildi, yozishga ruxsat
             await bot.telegram.restrictChatMember(GROUP_ID, userId, {
                 can_send_messages: true,
                 can_send_audios: true,
@@ -42,8 +43,13 @@ async function checkAndUnmute(userId) {
                 can_add_web_page_previews: true
             });
             return true;
+        } else {
+            // Shartlar bajarilmadi (yoki kanaldan chiqqan), yozishni cheklaymiz
+            await bot.telegram.restrictChatMember(GROUP_ID, userId, {
+                can_send_messages: false
+            });
+            return false;
         }
-        return false;
     } catch (error) {
         console.error("Tekshirishda xatolik:", error);
         return false;
@@ -58,9 +64,22 @@ bot.on('chat_join_request', async (ctx) => {
 });
 
 bot.on('chat_member', async (ctx) => {
+    // Ommaviy kanaldagi o'zgarishlarni kuzatish
     if (ctx.chat.username && ctx.chat.username.toLowerCase() === PUBLIC_CHANNEL.replace('@', '').toLowerCase()) {
-        const userId = ctx.from.id;
-        await checkAndUnmute(userId);
+        const user = ctx.update.chat_member.user;
+        const userId = user.id;
+        const newStatus = ctx.update.chat_member.new_chat_member.status;
+
+        const isAllowed = await checkAndUnmute(userId);
+
+        // Agar foydalanuvchi kanaldan chiqsa
+        if (!isAllowed && ['left', 'kicked'].includes(newStatus)) {
+            try {
+                await bot.telegram.sendMessage(GROUP_ID, `⚠️ [${user.first_name}](tg://user?id=${userId}), siz ommaviy kanaldan chiqqaningiz sababli guruhda yozish huquqidan mahrum bo'ldingiz!\n\nQayta yozish ruxsatini olish uchun obunani yangilang:\n1️⃣ ${PUBLIC_CHANNEL}\n2️⃣ ${PRIVATE_CHANNEL_LINK}`, { parse_mode: 'Markdown' });
+            } catch (e) {
+                console.log("Xabar yuborishda xato");
+            }
+        }
     }
 });
 
@@ -68,12 +87,12 @@ bot.on('new_chat_members', async (ctx) => {
     if (ctx.chat.id == GROUP_ID) {
         for (let user of ctx.message.new_chat_members) {
             try {
-                await bot.telegram.restrictChatMember(GROUP_ID, user.id, {
-                    can_send_messages: false
-                });
-                await ctx.replyWithMarkdown(`Salom [${user.first_name}](tg://user?id=${user.id})!\n\nGuruhda yozish ruxsatini olish uchun quyidagi shartlarni bajaring:\n\n1️⃣ Ommaviy kanalga qo'shiling: ${PUBLIC_CHANNEL}\n2️⃣ Yopiq kanalga zayavka tashlang: ${PRIVATE_CHANNEL_LINK}`);
+                const isAllowed = await checkAndUnmute(user.id);
+                if (!isAllowed) {
+                    await ctx.replyWithMarkdown(`Salom [${user.first_name}](tg://user?id=${user.id})!\n\nGuruhda yozish ruxsatini olish uchun quyidagi shartlarni bajaring:\n\n1️⃣ Ommaviy kanalga qo'shiling: ${PUBLIC_CHANNEL}\n2️⃣ Yopiq kanalga zayavka tashlang: ${PRIVATE_CHANNEL_LINK}`);
+                }
             } catch (err) {
-                console.log("Cheklashda xatolik:", err);
+                console.log("A'zoni cheklashda xatolik:", err);
             }
         }
     }
