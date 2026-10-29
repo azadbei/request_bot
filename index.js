@@ -10,19 +10,26 @@ const PRIVATE_CHANNEL_LINK = 'https://t.me/+o3h2rDKD0NE2NDk6';
 
 const bot = new Telegraf(token);
 
+// Bazalar
 const dataFile = path.join(__dirname, 'requestedUsers.json');
+const warningsFile = path.join(__dirname, 'warnings.json'); // Xabar ID lari uchun baza
+
 let requestedUsers = new Set();
+let warningMessages = {};
 
-// Yuborilgan ogohlantirish xabarlari ID larini saqlash uchun
-const warningMessages = new Map();
-
+// Bazalarni o'qish
 if (fs.existsSync(dataFile)) {
-    const rawData = fs.readFileSync(dataFile);
-    requestedUsers = new Set(JSON.parse(rawData));
+    requestedUsers = new Set(JSON.parse(fs.readFileSync(dataFile)));
+}
+if (fs.existsSync(warningsFile)) {
+    warningMessages = JSON.parse(fs.readFileSync(warningsFile));
 }
 
 function saveRequestedUsers() {
     fs.writeFileSync(dataFile, JSON.stringify(Array.from(requestedUsers)));
+}
+function saveWarnings() {
+    fs.writeFileSync(warningsFile, JSON.stringify(warningMessages));
 }
 
 async function checkAndUnmute(userId) {
@@ -32,7 +39,7 @@ async function checkAndUnmute(userId) {
         const requestedPrivate = requestedUsers.has(userId);
 
         if (inPublicChannel && requestedPrivate) {
-            // Shartlar bajarildi, yozishga ruxsat beramiz
+            // Ruxsat berish
             await bot.telegram.restrictChatMember(GROUP_ID, userId, {
                 can_send_messages: true,
                 can_send_audios: true,
@@ -46,18 +53,18 @@ async function checkAndUnmute(userId) {
                 can_add_web_page_previews: true
             });
 
-            // Agar ogohlantirish xabari guruhga yuborilgan bo'lsa, uni o'chiramiz
-            if (warningMessages.has(userId)) {
+            // Agar shu foydalanuvchiga ogohlantirish berilgan bo'lsa, uni topib o'chirish
+            if (warningMessages[userId]) {
                 try {
-                    await bot.telegram.deleteMessage(GROUP_ID, warningMessages.get(userId));
-                    warningMessages.delete(userId); // O'chirilgach, xotiradan tozalaymiz
+                    await bot.telegram.deleteMessage(GROUP_ID, warningMessages[userId]);
+                    delete warningMessages[userId]; // O'chirilgach, ro'yxatdan olib tashlaymiz
+                    saveWarnings();
                 } catch (e) {
-                    console.log("Xabarni o'chirishda xatolik:", e);
+                    console.log("Xabarni o'chirishda xatolik:", e.description || e);
                 }
             }
             return true;
         } else {
-            // Shartlar bajarilmadi, yozishni cheklaymiz
             await bot.telegram.restrictChatMember(GROUP_ID, userId, {
                 can_send_messages: false
             });
@@ -84,11 +91,12 @@ bot.on('chat_member', async (ctx) => {
 
         const isAllowed = await checkAndUnmute(userId);
 
+        // Kanaldan chiqib ketganda
         if (!isAllowed && ['left', 'kicked'].includes(newStatus)) {
             try {
-                // Kanaldan chiqqani haqida ogohlantirish va uning ID sini saqlash
                 const sentMsg = await bot.telegram.sendMessage(GROUP_ID, `⚠️ [${user.first_name}](tg://user?id=${userId}), siz ommaviy kanaldan chiqqaningiz sababli guruhda yozish huquqidan mahrum bo'ldingiz!\n\nQayta yozish ruxsatini olish uchun obunani yangilang:\n1️⃣ ${PUBLIC_CHANNEL}\n2️⃣ ${PRIVATE_CHANNEL_LINK}`, { parse_mode: 'Markdown' });
-                warningMessages.set(userId, sentMsg.message_id);
+                warningMessages[userId] = sentMsg.message_id;
+                saveWarnings();
             } catch (e) {
                 console.log("Xabar yuborishda xato");
             }
@@ -102,9 +110,9 @@ bot.on('new_chat_members', async (ctx) => {
             try {
                 const isAllowed = await checkAndUnmute(user.id);
                 if (!isAllowed) {
-                    // Yangi a'zoga shartlarni tashlash va xabar ID sini saqlash
                     const sentMsg = await ctx.replyWithMarkdown(`Salom [${user.first_name}](tg://user?id=${user.id})!\n\nGuruhda yozish ruxsatini olish uchun quyidagi shartlarni bajaring:\n\n1️⃣ Ommaviy kanalga qo'shiling: ${PUBLIC_CHANNEL}\n2️⃣ Yopiq kanalga zayavka tashlang: ${PRIVATE_CHANNEL_LINK}`);
-                    warningMessages.set(user.id, sentMsg.message_id);
+                    warningMessages[user.id] = sentMsg.message_id;
+                    saveWarnings();
                 }
             } catch (err) {
                 console.log("A'zoni cheklashda xatolik:", err);
@@ -131,4 +139,3 @@ bot.launch({
 
 process.once('SIGINT', () => { bot.stop('SIGINT'); server.close(); });
 process.once('SIGTERM', () => { bot.stop('SIGTERM'); server.close(); });
-
