@@ -1,6 +1,7 @@
 const { Telegraf } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
+const http = require('http'); // Render uchun qo'shildi
 
 const token = '9154919587:AAEta__W6G-sUa62R-EpA1HHr1FES-IlE84';
 const GROUP_ID = '-1002648012307'; 
@@ -78,15 +79,21 @@ bot.on('new_chat_members', async (ctx) => {
     }
 });
 
-console.log("Telegram serveriga ulanmoqda...");
+// --- RENDER BЕPUL TARIFI UCHUN MAXSUS SERVER ---
+const server = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end("Bot aktiv holatda!");
+});
+server.listen(process.env.PORT || 3000, () => {
+    console.log("Web server ishga tushdi...");
+});
+// -----------------------------------------------
 
 bot.launch({
     allowedUpdates: ['message', 'chat_member', 'chat_join_request']
 }).then(() => {
-    console.log("✅ Telegraf bot muvaffaqiyatli ishga tushdi va ishlashga tayyor!");
-}).catch((err) => {
-    console.error("❌ Telegram serveriga ulanishda xato (VPN yoqishingiz kerak):", err.message);
+    console.log("✅ Telegraf bot muvaffaqiyatli ishga tushdi!");
 });
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => { bot.stop('SIGINT'); server.close(); });
+process.once('SIGTERM', () => { bot.stop('SIGTERM'); server.close(); });
